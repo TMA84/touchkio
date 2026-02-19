@@ -33,10 +33,31 @@ global.WEBVIEW = global.WEBVIEW || {
   },
 };
 
-const HIDE_CURSOR_CSS = "html, body, *, *::before, *::after { cursor: none !important; }";
+const HIDE_CURSOR_CSS = `
+  html, body, *, *::before, *::after {
+    cursor: none !important;
+    -webkit-tap-highlight-color: transparent !important;
+  }
+`;
+
+const parseBoolArg = (value, fallback) => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["false", "0", "no", "off"].includes(normalized)) {
+      return false;
+    }
+  }
+  return fallback;
+};
 
 const hideCursor = (webContents) => {
-  if (ARGS.web_cursor !== "false") {
+  if (WEBVIEW.cursorVisible) {
     return;
   }
   webContents.insertCSS(HIDE_CURSOR_CSS);
@@ -66,7 +87,8 @@ const init = async () => {
   // Parse arguments
   const debug = "app_debug" in ARGS;
   const widget = ARGS.web_widget ? ARGS.web_widget === "true" : true;
-  ARGS.web_cursor = ["true", "false"].includes(ARGS.web_cursor) ? ARGS.web_cursor : "true";
+  WEBVIEW.cursorVisible = parseBoolArg(ARGS.web_cursor, true);
+  ARGS.web_cursor = WEBVIEW.cursorVisible ? "true" : "false";
   const theme = ["light", "dark"].includes(ARGS.web_theme) ? ARGS.web_theme : "dark";
   const zoom = (!isNaN(parseFloat(ARGS.web_zoom)) ? parseFloat(ARGS.web_zoom) : 1.25) * 100;
   const urls = [loaderHtml(40, 1.0, theme), ...ARGS.web_url];
