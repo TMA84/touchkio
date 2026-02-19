@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const path = require("path");
 
 const date = new Date().toISOString();
+const [repoOwner, repoName] = (process.env.GITHUB_REPOSITORY || "leukipp/touchkio").split("/");
 
 const generateBuildFile = (platform, arch, maker) => {
   const package = fs.readFileSync(path.join(__dirname, "package.json"), "utf8");
@@ -43,8 +44,8 @@ module.exports = {
       name: "@electron-forge/publisher-github",
       config: {
         repository: {
-          owner: "leukipp",
-          name: "touchkio",
+          owner: repoOwner,
+          name: repoName,
         },
         draft: true,
       },
