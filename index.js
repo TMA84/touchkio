@@ -330,6 +330,11 @@ const promptArgs = async (proc) => {
       fallback: "true",
     },
     {
+      key: "web_cursor",
+      question: "Enter WEB cursor visible",
+      fallback: "true",
+    },
+    {
       key: "mqtt",
       question: "\nConnect to MQTT Broker?",
       fallback: "y/N",

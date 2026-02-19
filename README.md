@@ -119,6 +119,7 @@ The available arguments to control the kiosk application via terminal are as fol
 | `--web-theme` (Optional)  | `dark`  | Theme settings of the web browser (`light` or `dark`)                                                      |
 | `--web-zoom` (Optional)   | `1.25`  | Zoom settings of the web browser (`1.0` is `100%`)                                                         |
 | `--web-widget` (Optional) | `true`  | Enables the sidebar widget (`true` or `false`)                                                             |
+| `--web-cursor` (Optional) | `true`  | Shows the mouse pointer (`true` or `false`)                                                                |
 
 These arguments allow you to customize the appearance of the web browser view.
 

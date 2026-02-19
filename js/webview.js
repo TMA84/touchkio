@@ -33,6 +33,15 @@ global.WEBVIEW = global.WEBVIEW || {
   },
 };
 
+const HIDE_CURSOR_CSS = "html, body, *, *::before, *::after { cursor: none !important; }";
+
+const hideCursor = (webContents) => {
+  if (ARGS.web_cursor !== "false") {
+    return;
+  }
+  webContents.insertCSS(HIDE_CURSOR_CSS);
+};
+
 /**
  * Initializes the webview with the provided arguments.
  *
@@ -57,6 +66,7 @@ const init = async () => {
   // Parse arguments
   const debug = "app_debug" in ARGS;
   const widget = ARGS.web_widget ? ARGS.web_widget === "true" : true;
+  ARGS.web_cursor = ["true", "false"].includes(ARGS.web_cursor) ? ARGS.web_cursor : "true";
   const theme = ["light", "dark"].includes(ARGS.web_theme) ? ARGS.web_theme : "dark";
   const zoom = (!isNaN(parseFloat(ARGS.web_zoom)) ? parseFloat(ARGS.web_zoom) : 1.25) * 100;
   const urls = [loaderHtml(40, 1.0, theme), ...ARGS.web_url];
@@ -175,6 +185,9 @@ const init = async () => {
   WEBVIEW.pager.setBackgroundColor("#00000000");
   WEBVIEW.window.contentView.addChildView(WEBVIEW.pager);
   WEBVIEW.pager.webContents.loadFile(path.join(APP.path, "html", "pager.html"));
+  WEBVIEW.pager.webContents.on("dom-ready", () => {
+    hideCursor(WEBVIEW.pager.webContents);
+  });
 
   // Init global widget
   WEBVIEW.widget = new WebContentsView({
@@ -187,6 +200,9 @@ const init = async () => {
   WEBVIEW.widget.setBackgroundColor("#00000000");
   WEBVIEW.window.contentView.addChildView(WEBVIEW.widget);
   WEBVIEW.widget.webContents.loadFile(path.join(APP.path, "html", "widget.html"));
+  WEBVIEW.widget.webContents.on("dom-ready", () => {
+    hideCursor(WEBVIEW.widget.webContents);
+  });
 
   // Init global status
   WEBVIEW.status = new WebContentsView({
@@ -199,6 +215,9 @@ const init = async () => {
   WEBVIEW.status.setBackgroundColor("#00000000");
   WEBVIEW.window.contentView.addChildView(WEBVIEW.status);
   WEBVIEW.status.webContents.loadFile(path.join(APP.path, "html", "status.html"));
+  WEBVIEW.status.webContents.on("dom-ready", () => {
+    hideCursor(WEBVIEW.status.webContents);
+  });
 
   // Init global navigation
   WEBVIEW.navigation = new WebContentsView({
@@ -211,6 +230,9 @@ const init = async () => {
   WEBVIEW.navigation.setBackgroundColor("#00000000");
   WEBVIEW.window.contentView.addChildView(WEBVIEW.navigation);
   WEBVIEW.navigation.webContents.loadFile(path.join(APP.path, "html", "navigation.html"));
+  WEBVIEW.navigation.webContents.on("dom-ready", () => {
+    hideCursor(WEBVIEW.navigation.webContents);
+  });
 
   // Init global layout
   const { width, height, x, y } = WEBVIEW.window.getBounds();
@@ -1096,6 +1118,7 @@ const viewEvents = async () => {
     });
     view.webContents.on("dom-ready", () => {
       view.webContents.insertCSS("::-webkit-scrollbar { display: none; }");
+      hideCursor(view.webContents);
     });
 
     // Webview fully loaded
