@@ -87,7 +87,8 @@ const init = async () => {
   // Parse arguments
   const debug = "app_debug" in ARGS;
   const widget = ARGS.web_widget ? ARGS.web_widget === "true" : true;
-  WEBVIEW.cursorVisible = parseBoolArg(ARGS.web_cursor, true);
+  const cursor = ARGS.web_cursor ?? ARGS["web:cursor"] ?? ARGS.web_curser;
+  WEBVIEW.cursorVisible = parseBoolArg(cursor, true);
   ARGS.web_cursor = WEBVIEW.cursorVisible ? "true" : "false";
   const theme = ["light", "dark"].includes(ARGS.web_theme) ? ARGS.web_theme : "dark";
   const zoom = (!isNaN(parseFloat(ARGS.web_zoom)) ? parseFloat(ARGS.web_zoom) : 1.25) * 100;
