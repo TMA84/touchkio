@@ -147,7 +147,7 @@ To broadcast your local sensor data to Home Assistant, you can use the following
 | Name                          | Default         | Description                                                                              |
 | ----------------------------- | --------------- | ---------------------------------------------------------------------------------------- |
 | `--mqtt-url` (Required)       | -               | Url of the MQTT broker instance (MQTT(S)://IP:PORT)                                      |
-| `--mqtt-user` (Required)      | -               | Username which is available in Home Assistant (e.g. create a user named `kiosk`)         |
+| `--mqtt-user` (Required)      | -               | Username which is available in Home Assistant (e.g. create a user named `user`)          |
 | `--mqtt-password` (Required)  | -               | The password of the user (e.g. use `password`, because it's secure and easy to remember) |
 | `--mqtt-discovery` (Optional) | `homeassistant` | The discovery prefix for MQTT (`homeassistant` works with default setups)                |
 
@@ -156,7 +156,7 @@ You can find them under **Settings** -> **Devices and Services** -> **Devices** 
 
 For example:
 ```bash
-touchkio --web-url=http://192.168.1.42:8123 --mqtt-url=mqtt://192.168.1.42:1883 --mqtt-user=kiosk --mqtt-password=password
+touchkio --web-url=http://192.168.1.42:8123 --mqtt-url=mqtt://192.168.1.42:1883 --mqtt-user=user --mqtt-password=password
 ```
 
 ## User Interface
@@ -241,6 +241,11 @@ The kiosk application interacts with squeekboard via the `D-Bus` object path `/s
 The Raspberry Pi's **build-in screen blanking** function uses the command `swayidle -w timeout 600 'wlopm --off \*' resume 'wlopm --on \*' &` inside `~/.config/labwc/autostart` to blank the screen after **10 minutes**.
 The `wlopm --off \*` command changes the `/sys/class/backlight/*/bl_power` value to **4**, when setting the value to **0** the screen will turn on again.
 However, `swayidle` still seems to consider the screen to be off and as a result it will not turn off again unless there is some interaction in the meantime.
+
+When using Raspberry Pi OS with labwc/Wayland and `wayvnc`, display power control through `wlopm` will fail while a VNC client is actively connected.
+In this state, commands such as `wlopm --off DSI-2` or `wlopm --on DSI-2` return `ERROR: Setting power mode for output 'DSI-2' failed.`
+The issue occurs during an active VNC screen capture session. After disconnecting the VNC client, `wlopm` starts working again without rebooting the device or restarting TouchKio.
+If display power control is automated through Home Assistant, it is recommended to avoid testing or relying on display on/off commands while a VNC session is active, or to verify that the requested display state was actually applied.
 
 When using the MQTT integration, the kiosk application must be able to **detect changes** made on the **device** itself.
 I managed to achieve this for the `/sys/class/backlight/*/brightness` file by implementing a simple `fs.watch(..)` file listener.

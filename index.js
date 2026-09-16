@@ -13,32 +13,12 @@ global.APP = global.APP || {};
 global.ARGS = global.ARGS || {};
 global.EVENTS = global.EVENTS || new Events();
 
-// Check display environment variable
-if (!process.env.DISPLAY) {
-  console.error(`\n$DISPLAY variable not set to run the GUI application, are you connected via SSH?\n`);
-  console.error(`If you have installed the service use:`);
-  console.error(`  systemctl --user start touchkio.service`);
-  console.error(`Alternatively export the variables first:`);
-  console.error(`  export DISPLAY=":0" && export WAYLAND_DISPLAY="wayland-0" && touchkio\n`);
-  process.exit(1);
-}
-
-// Move electron log file
-const elog = path.join(app.getPath("logs"), "electron.log");
-try {
-  if (fs.existsSync(elog)) {
-    fs.renameSync(elog, elog.replace(".log", ".old.log"));
-  }
-  console.debug = () => {};
-} catch (error) {
-  console.error("Failed to move electron log file:", error.message);
-}
-app.commandLine.appendSwitch("log-file", elog);
-
 /**
- * This promise resolves when the app has finished initializing,
+ * This method resolves when the app has finished initializing,
  * allowing to safely create browser windows and perform other
  * initialization tasks.
+ *
+ * @returns {Promise<void>}
  */
 app.whenReady().then(async () => {
   if (!(await initApp()) || !(await initArgs()) || !(await initLog())) {
@@ -71,7 +51,7 @@ app.whenReady().then(async () => {
 /**
  * Initializes the global app object.
  *
- * @returns {bool} Returns true if the initialization was successful.
+ * @returns {Promise<boolean>} True if the initialization was successful.
  */
 const initApp = async () => {
   const packageJsonPath = path.join(app.getAppPath(), "package.json");
@@ -81,6 +61,7 @@ const initApp = async () => {
   const buildFileExists = fs.existsSync(buildJsonPath);
 
   // Set required app infos
+  APP.start = new Date();
   APP.name = app.getName();
   APP.title = packageJson.title;
   APP.version = app.getVersion();
@@ -151,7 +132,7 @@ const initApp = async () => {
 /**
  * Initializes the global args object.
  *
- * @returns {bool} Returns true if the initialization was successful.
+ * @returns {Promise<boolean>} True if the initialization was successful.
  */
 const initArgs = async () => {
   let args = parseArgs(process);
@@ -190,17 +171,25 @@ const initArgs = async () => {
     return app.exit(1);
   }
 
-  // Split url arguments
+  // Split arguments parameter
   args.web_url = args.web_url || [];
   if (!Array.isArray(args.web_url)) {
     args.web_url = args.web_url.split(",").map((url) => url.trim());
+  }
+  args.app_disable = args.app_disable || [];
+  if (!Array.isArray(args.app_disable)) {
+    args.app_disable = args.app_disable.split(",").map((disable) => disable.trim());
+  }
+  args.app_reset = args.app_reset || [];
+  if (!Array.isArray(args.app_reset)) {
+    args.app_reset = args.app_reset.split(",").map((reset) => reset.trim());
   }
 
   // Calculate arguments hash
   const argsFileHash = crypto.createHash("sha256").update(JSON.stringify(args)).digest("hex");
   const argsUpdated = argsFileHashExists && argsFileHash !== fs.readFileSync(argsFileHashPath, "utf8");
-  if (argsUpdated && !("app_reset" in args)) {
-    args.app_reset = "arguments";
+  if (argsUpdated && !args.app_reset.includes("arguments")) {
+    args.app_reset.push("arguments");
   }
   if (fs.existsSync(APP.cache)) {
     fs.writeFileSync(argsFileHashPath, argsFileHash);
@@ -215,7 +204,7 @@ const initArgs = async () => {
 /**
  * Initializes the global log object.
  *
- * @returns {bool} Returns true if the initialization was successful.
+ * @returns {Promise<boolean>} True if the initialization was successful.
  */
 const initLog = async () => {
   try {
@@ -240,14 +229,7 @@ const initLog = async () => {
     onError({ error, versions }) {
       if (!error?.message?.includes("Object has been destroyed")) {
         const build = { ...APP.build, ...versions };
-        const whoopsie = "💥 Whoopsie!";
-        const section2 = `# Description\n- Hardware information?\n- How to reproduce?\n- Additional logs?\n`;
-        const section3 = `# Error\n\`\`\`bash\n${new Date().toISOString()}: ${error.stack}\n\`\`\`\n`;
-        const section4 = `# Application\n\`\`\`json\n${JSON.stringify(build, null, 2)}\n\`\`\`\n`;
-        const title = encodeURIComponent(`${whoopsie} - ${error}`);
-        const body = encodeURIComponent(`${section2}\n${section3}\n${section4}`);
-        console.error(`${whoopsie} -`, error, build);
-        console.info(`🪲 Report issue --> ${APP.issues}/new?title=${title}&body=${body}`);
+        console.error(`💥 Whoopsie! -`, error, build);
       }
       app.quit();
     },
@@ -274,7 +256,7 @@ const initLog = async () => {
 
   // Overwrite console log
   Object.assign(console, log.functions);
-  console.silly("Welcome To The Jungle!");
+  console.silly("WELCOME TO THE JUNGLE");
 
   return true;
 };
@@ -299,7 +281,7 @@ const parseArgs = (proc) => {
  * Prompts argument values on the command-line.
  *
  * @param {Object} proc - The process object.
- * @returns {Object} An object mapping argument names to their corresponding values.
+ * @returns {Promise<Object>} An object mapping argument names to their corresponding values.
  */
 const promptArgs = async (proc) => {
   const read = readline.createInterface({
@@ -346,8 +328,8 @@ const promptArgs = async (proc) => {
     },
     {
       key: "mqtt_user",
-      question: "Enter MQTT username",
-      fallback: "kiosk",
+      question: "Enter MQTT user",
+      fallback: "user",
     },
     {
       key: "mqtt_password",
@@ -411,36 +393,41 @@ const promptArgs = async (proc) => {
 /**
  * Writes argument values to the filesystem.
  *
- * @param {string} path - Path of the .json file.
+ * @param {string} file - Path of the .json file.
  * @param {Object} args - The arguments object.
+ * @returns {void}
  */
-const writeArgs = (path, args) => {
+const writeArgs = (file, args) => {
   try {
-    const argc = Object.assign({}, args);
-    if ("mqtt_password" in argc) {
-      argc.mqtt_password = encrypt(argc.mqtt_password);
+    if (fs.existsSync(path.dirname(file))) {
+      const argc = Object.assign({}, args);
+      if ("mqtt_password" in argc) {
+        argc.mqtt_password = encrypt(argc.mqtt_password);
+      }
+      fs.writeFileSync(file, JSON.stringify(argc, null, 2));
     }
-    fs.writeFileSync(path, JSON.stringify(argc, null, 2));
   } catch (error) {
-    console.error(`Failed to write ${path}:`, error.message);
+    console.error(`Failed to write ${file}:`, error.message);
   }
 };
 
 /**
  * Reads argument values from the filesystem.
  *
- * @param {string} path - Path of the .json file.
+ * @param {string} file - Path of the .json file.
  * @returns {Object} The arguments object.
  */
-const readArgs = (path) => {
+const readArgs = (file) => {
   try {
-    const args = JSON.parse(fs.readFileSync(path, "utf8"));
-    if ("mqtt_password" in args) {
-      args.mqtt_password = decrypt(args.mqtt_password);
+    if (fs.existsSync(file)) {
+      const args = JSON.parse(fs.readFileSync(file, "utf8"));
+      if ("mqtt_password" in args) {
+        args.mqtt_password = decrypt(args.mqtt_password);
+      }
+      return args;
     }
-    return args;
   } catch (error) {
-    console.error(`Failed to parse ${path}:`, error.message);
+    console.error(`Failed to parse ${file}:`, error.message);
   }
   return {};
 };
@@ -453,7 +440,7 @@ const readArgs = (path) => {
  */
 const encrypt = (value) => {
   const iv = crypto.randomBytes(16);
-  const key = crypto.scryptSync(hardware.getMachineId(), APP.name, 32);
+  const key = crypto.scryptSync(hardware.getMachineId(), app.getName(), 32);
   const cipher = crypto.createCipheriv("aes-256-cbc", key, iv);
   let encrypted = cipher.update(value, "utf8", "hex");
   encrypted += cipher.final("hex");
@@ -469,7 +456,7 @@ const encrypt = (value) => {
 const decrypt = (value) => {
   const p = Buffer.from(value, "base64").toString("utf8").split(":");
   const iv = Buffer.from(p.shift(), "hex");
-  const key = crypto.scryptSync(hardware.getMachineId(), APP.name, 32);
+  const key = crypto.scryptSync(hardware.getMachineId(), app.getName(), 32);
   const decipher = crypto.createDecipheriv("aes-256-cbc", key, iv);
   const buffer = Buffer.from(p.join(":"), "hex");
   let decrypted = decipher.update(buffer, "binary", "utf8");
@@ -481,8 +468,43 @@ const decrypt = (value) => {
  * Helper function for asynchronous sleep.
  *
  * @param {number} ms - Sleep time in milliseconds.
- * @returns {Promise} A promise resolving after the timeout.
+ * @returns {Promise<void>}
  */
 const sleep = (ms) => {
   return new Promise((r) => setTimeout(r, ms));
 };
+
+/**
+ * This method runs immediately when the process starts,
+ * allowing to check necessary environment variables and
+ * append internal command line switches.
+ *
+ * @returns {void}
+ */
+(() => {
+  console.debug = () => {};
+
+  // Check display environment variable
+  if (!process.env.DISPLAY) {
+    console.error(`\n$DISPLAY variable not set to run the GUI application, are you connected via SSH?\n`);
+    console.error(`If you have installed the service use:`);
+    console.error(`  systemctl --user start touchkio.service`);
+    console.error(`Alternatively export the variables first:`);
+    console.error(`  export DISPLAY=":0" && export WAYLAND_DISPLAY="wayland-0" && touchkio\n`);
+    process.exit(1);
+  }
+
+  // Append electron log file switch
+  try {
+    const elog = path.join(app.getPath("logs"), "electron.log");
+    fs.existsSync(elog) && fs.renameSync(elog, elog.replace(".log", ".old.log"));
+    app.commandLine.appendSwitch("log-file", elog);
+  } catch {}
+
+  // Append unsafe secure origin switch
+  try {
+    const args = readArgs(path.join(app.getPath("userData"), "Arguments.json"));
+    const origins = (args.web_url || []).map((url) => new URL(url).origin).filter(Boolean);
+    app.commandLine.appendSwitch("unsafely-treat-insecure-origin-as-secure", origins.join(","));
+  } catch {}
+})();

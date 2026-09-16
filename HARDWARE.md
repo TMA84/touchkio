@@ -25,6 +25,7 @@ If you are running Linux with a graphical user interface (Wayland or X11), you s
 | Raspberry Pi 4 (arm64) | Raspberry Pi OS (64-bit), Wayland, X11 | [Official 7" Touch Display 2 (720x1280)](https://www.raspberrypi.com/products/touch-display-2)           | 🟩      |
 | Raspberry Pi 5 (arm64) | Raspberry Pi OS (64-bit), Wayland, X11 | [Official 7" Touch Display 1 (800x480)](https://www.raspberrypi.com/products/raspberry-pi-touch-display) | 🟩      |
 | Raspberry Pi 5 (arm64) | Raspberry Pi OS (64-bit), Wayland, X11 | [Official 7" Touch Display 2 (720x1280)](https://www.raspberrypi.com/products/touch-display-2)           | 🟩      |
+| Raspberry Pi 5 (arm64) | Raspberry Pi OS (64-bit), Wayland, X11 | [Official 10" Touch Display 2 (1200x1920)](https://www.raspberrypi.com/products/touch-display-2)         | 🟩      |
 | Raspberry Pi 5 (arm64) | Raspberry Pi OS (64-bit), Wayland, X11 | [Waveshare 10.1" DSI Touch (800x1280)](https://www.waveshare.com/10.1-dsi-touch-a.htm)                   | 🟩      |
 | Raspberry Pi 5 (arm64) | Raspberry Pi OS (64-bit), Wayland, X11 | [Waveshare 12.3" DSI Touch (720x1920)](https://www.waveshare.com/12.3-dsi-touch-a.htm)                   | 🟩      |
 
@@ -58,16 +59,18 @@ If you are running Linux with a graphical user interface (Wayland or X11), you s
 
 Hardware support is verified during application startup and can be checked in the terminal or in the log file under the `Supported` section.
 The necessary requirements for MQTT sensors to work are listed here:
-| Name                 | Requirements                                                                                                  | References                                                                                                   |
-| -------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| App (Update)         | Requires `sudo` rights, `.deb` install and `touchkio.service` running .                                       | [#70](https://github.com/leukipp/touchkio/issues/70), [#77](https://github.com/leukipp/touchkio/issues/77)   |
-| Display (Status)     | Working `wlopm`, `kscreen-doctor` or `xset` command.                                                          | [#38](https://github.com/leukipp/touchkio/issues/38), [#57](https://github.com/leukipp/touchkio/issues/57)   |
-| Display (Brightness) | Requires `sudo` rights, device under `/sys/class/backlight/*/brightness` exists or working `ddcutil` command. | [#30](https://github.com/leukipp/touchkio/issues/30), [#101](https://github.com/leukipp/touchkio/issues/101) |
-| Keyboard             | Raspberry Pi OS (Wayland) with `squeekboard` running.                                                         | [#7](https://github.com/leukipp/touchkio/issues/7), [#85](https://github.com/leukipp/touchkio/issues/85)     |
-| Battery              | Device under `/sys/class/power_supply/*/capacity` exists.                                                     | [#33](https://github.com/leukipp/touchkio/issues/33)                                                         |
-| Volume               | Device (non-dummy) `pactl get-default-sink` exists.                                                           | [#82](https://github.com/leukipp/touchkio/issues/82)                                                         |
-| Reboot               | Requires password-less `sudo` rights.                                                                         | [#39](https://github.com/leukipp/touchkio/issues/39)                                                         |
-| Shutdown             | Requires password-less `sudo` rights.                                                                         | [#39](https://github.com/leukipp/touchkio/issues/39)                                                         |
+| Name                 | Requirements                                                                             | References                                                                                                   |
+| -------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| App (Update)         | Requires `sudo apt` rights, `.deb` install and `touchkio.service` running .              | [#70](https://github.com/leukipp/touchkio/issues/70), [#77](https://github.com/leukipp/touchkio/issues/77)   |
+| Display (Status)     | Working `wlopm`, `kscreen-doctor`, `xset` or `sudo ddcutil` command.                     | [#57](https://github.com/leukipp/touchkio/issues/57), [#194](https://github.com/leukipp/touchkio/pull/194)   |
+| Display (Brightness) | File under `/sys/class/backlight/*/brightness` exists or working `sudo ddcutil` command. | [#30](https://github.com/leukipp/touchkio/issues/30), [#101](https://github.com/leukipp/touchkio/issues/101) |
+| Keyboard             | Raspberry Pi OS (Wayland) with `squeekboard` running.                                    | [#7](https://github.com/leukipp/touchkio/issues/7), [#85](https://github.com/leukipp/touchkio/issues/85)     |
+| Battery              | File under `/sys/class/power_supply/*/capacity` exists.                                  | [#33](https://github.com/leukipp/touchkio/issues/33)                                                         |
+| Illuminance          | File under `/sys/bus/iio/devices/*/in_illuminance_raw` exists.                           | [#191](https://github.com/leukipp/touchkio/pull/191)                                                         |
+| Volume               | Device `pactl get-default-sink` exists.                                                  | [#82](https://github.com/leukipp/touchkio/issues/82)                                                         |
+| Microphone           | Device `pactl get-default-source` exists.                                                | [#195](https://github.com/leukipp/touchkio/issues/195)                                                       |
+| Reboot               | Requires password-less `sudo reboot` rights.                                             | [#39](https://github.com/leukipp/touchkio/issues/39)                                                         |
+| Shutdown             | Requires password-less `sudo shutdown` rights.                                           | [#39](https://github.com/leukipp/touchkio/issues/39)                                                         |
 
 ## FAQ
 
@@ -76,7 +79,7 @@ The necessary requirements for MQTT sensors to work are listed here:
 <details><summary>I have installed Ubuntu GNOME.</summary>
 
   - On some Debian based systems (e.g. Ubuntu GNOME), the display status control is only available when using X11 (`xset`).
-  - GNOME is the least supported window manager.
+  - GNOME running on wayland is the least supported window manager.
     - It's recommended to switch to KDE wayland, if you want better support for display status control (`kscreen-doctor`).
 
 </details>
@@ -108,26 +111,31 @@ The necessary requirements for MQTT sensors to work are listed here:
     - `wlopm --[on,off] \*` (Raspberry Pi OS, Wayland)
     - `kscreen-doctor --dpms [on,off]` (Debian KDE, Wayland)
     - `xset dpms force [on,off]` (Generic, X11)
+  - If none of the above commands are available on your system consider installing another OS. There is a build-in command prioritization in case [ddcutil](https://github.com/leukipp/touchkio/pull/194) is installed, but it's really slow and unreliable.
+    - `sudo ddcutil setvcp D6 0x04` turns off your screen [without asking](https://github.com/leukipp/touchkio/issues/39#issuecomment-4470939733) for a password.
+    - `sudo ddcutil setvcp D6 0x01` turns on your screen [without asking](https://github.com/leukipp/touchkio/issues/39#issuecomment-4470939733) for a password.
 
 </details>
 
 <details><summary>Display brightness can't be controlled through MQTT.</summary>
 
   - Have a look at the [features](https://github.com/leukipp/touchkio/blob/main/HARDWARE.md#features) section to check if all requirements are fulfilled.
-    - The **Display** MQTT control is a light entity with brightness support. So make sure to to [click on the entity](https://github.com/leukipp/touchkio/issues/75) to check for brightness support.
+    - The **Display** MQTT control is a light entity with brightness support. So make sure to [click on the entity](https://github.com/leukipp/touchkio/issues/75) to test the brightness slider.
+    - The brightness slider is also only available if the display status control (on/off) is functional and the [user has permissions](https://github.com/leukipp/touchkio/issues/39#issuecomment-4470939733) to modify the brightness value.
   - HDMI screens typically do not offer brightness control out of the box, so additional setup steps are required.
-    - Brightness support for [ddcutil](https://github.com/leukipp/touchkio/issues/101#issuecomment-3521247263) is build-in and checked on application startup.
-    - Alternatively installing [ddcci-driver-linux](https://github.com/leukipp/touchkio/issues/132#issue-3659009749) or [ddcci-dkms](https://github.com/leukipp/touchkio/issues/101#issuecomment-3571523927) may also work.
-  - Make sure that one of these works for your display when you run it directly on the terminal, otherwise the MQTT switch will not work either.
+    - It's recommended to install [ddcci-driver-linux](https://github.com/leukipp/touchkio/issues/132#issue-3659009749) or [ddcci-dkms](https://github.com/leukipp/touchkio/issues/101#issuecomment-3571523927), since this will create the necessary `/sys/class/backlight/*` folder structure.
+    - Additional brightness support using [ddcutil](https://github.com/leukipp/touchkio/issues/101#issuecomment-3521247263) is build-in and checked on application startup, but it's really slow and unreliable.
+  - Make sure that one of these works for your display when you run it directly on the terminal, otherwise the MQTT switch will not show the brightness control.
     - `sudo cat /sys/class/backlight/*/brightness` returns some numeric value.
-    - `sudo ddcutil setvcp 10 42` changes the brightness to 42% without asking for a password.
+    - `sudo ddcutil setvcp 10 42` changes the brightness to 42% [without asking](https://github.com/leukipp/touchkio/issues/39#issuecomment-4470939733) for a password.
 
 </details>
 
 <details><summary>Turning HDMI screen off via MQTT causes it to turn back on.</summary>
 
-  - There are certain HDMI screens (e.g. Viewsonic) where the MQTT display status command doesn't work as expected. 
-    - The screen [immediately turns on again](https://github.com/leukipp/touchkio/issues/38), which may be caused by incompatible HDMI cables being used.
+  - There are certain HDMI screens where the MQTT display status command doesn't work as expected. 
+    - The screen **immediately turns on again**, which may be caused by [incompatible HDMI](https://github.com/leukipp/touchkio/issues/38#issuecomment-3341641642) cables being used.
+    - Forcing [hotplug](https://github.com/leukipp/touchkio/issues/38#issuecomment-3347732956) may also help, but consider checking your HDMI cable connection and [display settings](https://github.com/leukipp/touchkio/issues/131#issuecomment-4026027425) first.
 
 </details>
 
@@ -209,8 +217,10 @@ The necessary requirements for MQTT sensors to work are listed here:
 
 <details><summary>The ddcutil command doesn't seem to be used.</summary>
 
-  - Currently `ddcutil` is only used for brightness control of HDMI screens.
-    - Make sure that your screen is supporting [continuous](https://github.com/leukipp/touchkio/issues/101#issuecomment-3521247263) adjustments of brightness values.
+  - Currently `ddcutil` can be optionally installed to control HDMI screens.
+    - Test if your local user has the [necessary permissions](https://github.com/leukipp/touchkio/issues/39) to run `sudo -n true` without being [prompted for a password](https://github.com/leukipp/touchkio/issues/116#issuecomment-3471566411).
+    - Make sure that your screen is supporting [continuous](https://github.com/leukipp/touchkio/issues/101#issuecomment-3521247263) adjustments of brightness.
+  - On Raspberry Pi OS the build-in screen blanking (`wlopm`) may fail when `ddcutil` was used to alter the screen state.
 
 </details>
 
@@ -223,13 +233,6 @@ The necessary requirements for MQTT sensors to work are listed here:
 </details>
 
 ### Errors
-
-<details><summary>Terminal is full with "ERROR:gbm_wrapper.cc" messages.</summary>
-
-  - On the terminal you may see some _ERROR:gbm_wrapper.cc_ messages.
-    - This appears to be a [known issue](https://github.com/electron/electron/issues/42322) that currently lacks a fix, but the webview still works.
-
-</details>
 
 <details><summary>CPU and RAM usage increases without reason.</summary>
 

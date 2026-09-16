@@ -13,6 +13,11 @@ global.HARDWARE = global.HARDWARE || {
       path: null,
     },
   },
+  illuminance: {
+    level: {
+      path: null,
+    },
+  },
   display: {
     status: {
       path: null,
@@ -29,14 +34,17 @@ global.HARDWARE = global.HARDWARE || {
     visible: null,
   },
   audio: {
-    device: null,
+    device: {
+      output: null,
+      input: null,
+    },
   },
 };
 
 /**
  * Initializes the hardware with the provided arguments.
  *
- * @returns {bool} Returns true if the initialization was successful.
+ * @returns {Promise<boolean>} True if the initialization was successful.
  */
 const init = async () => {
   if (!compatibleSystem()) {
@@ -49,12 +57,14 @@ const init = async () => {
   HARDWARE.session.type = sessionType();
   HARDWARE.session.desktop = sessionDesktop();
   HARDWARE.battery.level.path = getBatteryLevelPath();
+  HARDWARE.illuminance.level.path = getIlluminanceLevelPath();
   HARDWARE.display.status.path = getDisplayStatusPath();
   HARDWARE.display.status.command = getDisplayStatusCommand();
   HARDWARE.display.brightness.path = getDisplayBrightnessPath();
   HARDWARE.display.brightness.command = getDisplayBrightnessCommand();
   HARDWARE.display.brightness.value.max = getDisplayBrightnessMax();
-  HARDWARE.audio.device = getAudioDevice();
+  HARDWARE.audio.device.output = getAudioOutput();
+  HARDWARE.audio.device.input = getAudioInput();
   HARDWARE.support = checkSupport();
   HARDWARE.initialized = true;
 
@@ -86,48 +96,66 @@ const init = async () => {
 
   // Show hardware infos
   process.stdout.write("\n");
-  const unsupported = "unsupported";
+  const none = () => "unsupported";
+  const sudo = (cmd) => (["ddcutil", "tee"].includes(cmd) && HARDWARE.support.access.sudo ? `sudo ${cmd}` : cmd);
+
   const batteryLevel = `${getBatteryLevel()} (sysfs)`;
-  const batteryLevelInfo = HARDWARE.support.batteryLevel ? batteryLevel : unsupported;
+  const batteryLevelInfo = HARDWARE.support.batteryLevel ? batteryLevel : none();
   console.info(
-    `Battery Level [${HARDWARE.support.batteryLevel ? HARDWARE.battery.level.path : unsupported}]:`,
+    `Battery Level [${HARDWARE.support.batteryLevel ? HARDWARE.battery.level.path : none()}]:`,
     batteryLevelInfo,
   );
-  const displayStatus = `${getDisplayStatus()} (${HARDWARE.display.status.command})`;
-  const displayStatusInfo = HARDWARE.support.displayStatus ? displayStatus : unsupported;
+  const illuminanceLevel = `${getIlluminanceLevel()} (sysfs)`;
+  const illuminanceLevelInfo = HARDWARE.support.illuminanceLevel ? illuminanceLevel : none();
   console.info(
-    `Display Status [${HARDWARE.support.displayStatus ? HARDWARE.display.status.path : unsupported}]:`,
+    `Illuminance Level [${HARDWARE.support.illuminanceLevel ? HARDWARE.illuminance.level.path : none()}]:`,
+    illuminanceLevelInfo,
+  );
+  const displayStatus = `${getDisplayStatus()} (${sudo(HARDWARE.display.status.command)})`;
+  const displayStatusInfo = HARDWARE.support.displayStatus ? displayStatus : none();
+  console.info(
+    `Display Status [${HARDWARE.support.displayStatus ? HARDWARE.display.status.path : none()}]:`,
     displayStatusInfo,
   );
-  const displayBrightness = `${getDisplayBrightness()} (${HARDWARE.display.brightness.command || "sysfs"})`;
-  const displayBrightnessInfo = HARDWARE.support.displayBrightness ? displayBrightness : unsupported;
+  const displayBrightness = `${getDisplayBrightness()} (${sudo(HARDWARE.display.brightness.command)})`;
+  const displayBrightnessInfo = HARDWARE.support.displayBrightness ? displayBrightness : none();
   console.info(
-    `Display Brightness [${HARDWARE.support.displayBrightness ? HARDWARE.display.brightness.path || "ddc://vcp/feature/0x10" : unsupported}]:`,
+    `Display Brightness [${HARDWARE.support.displayBrightness ? HARDWARE.display.brightness.path : none()}]:`,
     displayBrightnessInfo,
   );
   const audioVolume = `${getAudioVolume()} (pactl)`;
-  const audioVolumeInfo = HARDWARE.support.audioVolume ? audioVolume : unsupported;
+  const audioVolumeInfo = HARDWARE.support.audioVolume ? audioVolume : none();
   console.info(
-    `Audio Volume [${HARDWARE.support.audioVolume ? HARDWARE.audio.device : unsupported}]:`,
+    `Audio Volume [${HARDWARE.support.audioVolume ? HARDWARE.audio.device.output : none()}]:`,
     audioVolumeInfo,
   );
-  const keyboardVisibility = `${getKeyboardVisibility()} (squeekboard)`;
-  const keyboardVisibilityInfo = HARDWARE.support.keyboardVisibility ? keyboardVisibility : unsupported;
+  const microphoneVolume = `${getMicrophoneVolume()} (pactl)`;
+  const microphoneVolumeInfo = HARDWARE.support.microphoneVolume ? microphoneVolume : none();
   console.info(
-    `Keyboard Visibility [${HARDWARE.support.keyboardVisibility ? "dbus://sm/puri/OSK0" : unsupported}]:`,
+    `Microphone Volume [${HARDWARE.support.microphoneVolume ? HARDWARE.audio.device.input : none()}]:`,
+    microphoneVolumeInfo,
+  );
+  const keyboardVisibility = `${getKeyboardVisibility()} (squeekboard)`;
+  const keyboardVisibilityInfo = HARDWARE.support.keyboardVisibility ? keyboardVisibility : none();
+  console.info(
+    `Keyboard Visibility [${HARDWARE.support.keyboardVisibility ? "dbus://sm/puri/OSK0" : none()}]:`,
     keyboardVisibilityInfo,
   );
   process.stdout.write("\n");
 
-  // Monitor audio volume
-  if (HARDWARE.support.audioVolume) {
+  // Monitor audio output and input volume
+  if (HARDWARE.support.audioVolume || HARDWARE.support.microphoneVolume) {
     commandMonitor("pactl", ["subscribe"], (reply, error) => {
       if (!reply || error) {
         return;
       }
-      if (reply.includes("'change' on sink")) {
+      if (HARDWARE.support.audioVolume && reply.includes("'change' on sink")) {
         console.info("Update Audio Volume:", getAudioVolume());
         EVENTS.emit("updateVolume");
+      }
+      if (HARDWARE.support.microphoneVolume && reply.includes("'change' on source")) {
+        console.info("Update Microphone Volume:", getMicrophoneVolume());
+        EVENTS.emit("updateMicrophone");
       }
     });
   }
@@ -159,6 +187,8 @@ const init = async () => {
 
 /**
  * Updates the shared hardware properties.
+ *
+ * @returns {Promise<void>}
  */
 const update = async () => {
   if (!HARDWARE.initialized || APP.exiting) {
@@ -200,16 +230,6 @@ const update = async () => {
   if (HARDWARE.support.displayBrightness) {
     let displayBrightnessChanged = false;
 
-    // Use cache brightness path if available
-    if (HARDWARE.display.brightness.command) {
-      const brightness = await readFile(path.join(APP.cache, "Brightness.vcp"), false);
-      const brightnessChanged = !!brightness && brightness !== HARDWARE.display.brightness.value.brightness;
-
-      // Update internal brightness values
-      HARDWARE.display.brightness.value.brightness = brightness;
-      displayBrightnessChanged |= brightnessChanged;
-    }
-
     // Use sysfs brightness path if available
     if (HARDWARE.display.brightness.path) {
       const brightness = await readFile(path.join(HARDWARE.display.brightness.path, "brightness"), false);
@@ -231,20 +251,20 @@ const update = async () => {
 /**
  * Verifies system compatibility by checking the presence of necessary sys paths.
  *
- * @returns {bool} Returns true if all paths exists.
+ * @returns {boolean} True if all paths exist.
  */
 const compatibleSystem = () => {
   if (os.platform() !== "linux") {
     return false;
   }
-  const paths = ["/sys/class/drm", "/sys/class/backlight", "/sys/class/power_supply", "/sys/class/thermal"];
+  const paths = ["/sys/class/drm", "/sys/class/backlight"];
   return paths.every((path) => fs.existsSync(path));
 };
 
 /**
  * Gets the session user name using `os.userInfo()`.
  *
- * @returns {string|null} Returns session user name or null if an error occurs.
+ * @returns {string|null} The session user name or null if an error occurs.
  */
 const sessionUser = () => {
   try {
@@ -256,7 +276,7 @@ const sessionUser = () => {
 /**
  * Gets the session type for the user using `loginctl`.
  *
- * @returns {string|null} Returns session type 'x11'/'wayland' or null if an error occurs.
+ * @returns {string|null} The session type 'x11'/'wayland' or null if an error occurs.
  */
 const sessionType = () => {
   if (!commandExists("loginctl")) {
@@ -272,7 +292,7 @@ const sessionType = () => {
 /**
  * Gets the desktop environment name by checking environment variables.
  *
- * @returns {string} Returns desktop environment name or 'unknown' if not detected.
+ * @returns {string} The desktop environment name or 'unknown' if not detected.
  */
 const sessionDesktop = () => {
   const envs = ["XDG_CURRENT_DESKTOP", "XDG_DESKTOP_SESSION", "DESKTOP_SESSION"];
@@ -283,29 +303,35 @@ const sessionDesktop = () => {
 /**
  * Checks supported features based on hardware and software.
  *
- * @returns {Object} Returns support object with boolean values.
+ * @returns {Object} The support object with boolean values.
  */
 const checkSupport = () => {
-  const sudo = sudoRights();
-  const service = serviceRuns(APP.name);
-  const keyboard = processRuns("squeekboard");
-  const release = APP.build.maker === "deb";
-
-  const audioDevice = !!HARDWARE.audio.device;
+  const audioOutput = !!HARDWARE.audio.device.output;
+  const audioInput = !!HARDWARE.audio.device.input;
   const batteryPath = !!HARDWARE.battery.level.path;
+  const illuminancePath = !!HARDWARE.illuminance.level.path;
   const statusPath = !!HARDWARE.display.status.path;
   const statusCommand = !!HARDWARE.display.status.command;
   const brightnessPath = !!HARDWARE.display.brightness.path && !!HARDWARE.display.brightness.value.max;
   const brightnessCommand = !!HARDWARE.display.brightness.command && !!HARDWARE.display.brightness.value.max;
+  const keyboardProcess = processRuns("squeekboard");
 
   return {
     batteryLevel: batteryPath,
+    illuminanceLevel: illuminancePath,
     displayStatus: statusPath && statusCommand,
-    displayBrightness: sudo && statusPath && statusCommand && (brightnessPath || brightnessCommand),
-    keyboardVisibility: keyboard,
-    audioVolume: audioDevice,
-    sudoRights: sudo,
-    appUpdate: service && sudo && release,
+    displayBrightness: statusPath && statusCommand && brightnessPath && brightnessCommand,
+    keyboardVisibility: keyboardProcess,
+    audioVolume: audioOutput,
+    microphoneVolume: audioInput,
+    access: {
+      sudo: sudoRights(),
+      reboot: rebootRights(),
+      shutdown: shutdownRights(),
+      install: installRights(),
+      service: serviceRuns(APP.name),
+      deb: APP.build.maker === "deb",
+    },
   };
 };
 
@@ -450,7 +476,12 @@ const getProcessorUsage = () => {
  * @returns {number|null} The CPU temperature in degrees celsius or null if nothing was found.
  */
 const getProcessorTemperature = () => {
+  const temperatures = {};
   const thermal = "/sys/class/thermal";
+  if (!fs.existsSync(thermal)) {
+    return null;
+  }
+  const types = ["cpu-thermal", "x86_pkg_temp", "k10temp", "TCPU", "cpu", "acpitz"];
   for (const zone of fs.readdirSync(thermal)) {
     const typeFile = path.join(thermal, zone, "type");
     const tempFile = path.join(thermal, zone, "temp");
@@ -458,11 +489,18 @@ const getProcessorTemperature = () => {
       continue;
     }
     const type = readFile(typeFile);
-    if (["cpu-thermal", "x86_pkg_temp", "k10temp", "acpitz", "cpu"].includes(type)) {
-      const temp = readFile(tempFile);
-      if (temp) {
-        return parseFloat(temp) / 1000;
-      }
+    if (!types.includes(type)) {
+      continue;
+    }
+    const temp = readFile(tempFile);
+    if (temp) {
+      temperatures[type] = parseFloat(temp) / 1000;
+    }
+  }
+  for (const type of types) {
+    const temp = temperatures[type];
+    if (Number.isFinite(temp) && temp >= 0 && temp <= 150) {
+      return temp;
     }
   }
   return null;
@@ -475,6 +513,9 @@ const getProcessorTemperature = () => {
  */
 const getBatteryLevelPath = () => {
   const power = "/sys/class/power_supply";
+  if (!fs.existsSync(power)) {
+    return null;
+  }
   for (const supply of fs.readdirSync(power)) {
     const capacityFile = path.join(power, supply, "capacity");
     if (!fs.existsSync(capacityFile)) {
@@ -502,19 +543,62 @@ const getBatteryLevel = () => {
 };
 
 /**
+ * Gets the ambient light sensor level path using `/sys/bus/iio/devices`.
+ *
+ * @returns {string|null} The illuminance sensor level path or null if nothing was found.
+ */
+const getIlluminanceLevelPath = () => {
+  const iio = "/sys/bus/iio/devices";
+  if (!fs.existsSync(iio)) {
+    return null;
+  }
+  for (const device of fs.readdirSync(iio)) {
+    const nameFile = path.join(iio, device, "name");
+    const illuminanceFile = path.join(iio, device, "in_illuminance_raw");
+    if (!fs.existsSync(nameFile) || !fs.existsSync(illuminanceFile)) {
+      continue;
+    }
+    const name = readFile(nameFile);
+    if (name === "als") {
+      return path.join(iio, device);
+    }
+  }
+  return null;
+};
+
+/**
+ * Gets the current ambient light level in lux using `/sys/bus/iio/devices/.../in_illuminance_raw`.
+ *
+ * @returns {number|null} The illuminance level in lux or null if nothing was found.
+ */
+const getIlluminanceLevel = () => {
+  if (!HARDWARE.support.illuminanceLevel) {
+    return null;
+  }
+  const illuminance = readFile(`${HARDWARE.illuminance.level.path}/in_illuminance_raw`);
+  if (illuminance) {
+    return parseFloat(illuminance);
+  }
+  return null;
+};
+
+/**
  * Gets the current display status path using `/sys/class/drm`.
  *
  * @returns {string|null} The display status path or null if nothing was found.
  */
 const getDisplayStatusPath = () => {
   const drm = "/sys/class/drm";
+  if (!fs.existsSync(drm)) {
+    return null;
+  }
   for (const card of fs.readdirSync(drm)) {
     const statusFile = path.join(drm, card, "status");
     if (!fs.existsSync(statusFile)) {
       continue;
     }
-    const content = readFile(statusFile);
-    if (content === "connected") {
+    const status = readFile(statusFile);
+    if (status === "connected") {
       return path.join(drm, card);
     }
   }
@@ -522,7 +606,7 @@ const getDisplayStatusPath = () => {
 };
 
 /**
- * Gets the available display status command checking for `wlopm`, `kscreen-doctor` and `xset`.
+ * Gets the available display status command checking for `ddcutil`, `wlopm`, `kscreen-doctor` and `xset`.
  *
  * @returns {string|null} The display status command or null if nothing was found.
  */
@@ -531,14 +615,50 @@ const getDisplayStatusCommand = () => {
   const desktop = HARDWARE.session.desktop;
   const mapping = {
     wayland: [
+      { command: "ddcutil", desktops: ["*"] },
       { command: "wlopm", desktops: ["labwc", "wayfire", "unknown"] },
       { command: "kscreen-doctor", desktops: ["kde", "plasma", "unknown"] },
     ],
-    x11: [{ command: "xset", desktops: ["*"] }],
+    x11: [
+      { command: "ddcutil", desktops: ["*"] },
+      { command: "xset", desktops: ["*"] },
+    ],
   }[type];
   for (const map of mapping || []) {
     if (commandExists(map.command) && map.desktops.some((d) => d === "*" || desktop.includes(d))) {
-      return map.command;
+      switch (map.command) {
+        case "ddcutil":
+          if (!sudoRights()) {
+            break;
+          }
+          const ddcutil = execSyncCommand("sudo", ["ddcutil", "capabilities"]);
+          if (ddcutil !== null && ddcutil.includes("Feature: D6")) {
+            HARDWARE.display.status.path = path.join(APP.cache, "Display");
+            fs.mkdirSync(HARDWARE.display.status.path, { recursive: true });
+            fs.writeFileSync(path.join(HARDWARE.display.status.path, "dpms"), "");
+            fs.writeFileSync(path.join(HARDWARE.display.status.path, "status"), "");
+            return map.command;
+          }
+          break;
+        case "wlopm":
+          const wlopm = execSyncCommand("wlopm", []);
+          if (wlopm !== null) {
+            return map.command;
+          }
+          break;
+        case "kscreen-doctor":
+          const kdoc = execSyncCommand("kscreen-doctor", ["--dpms", "show"]);
+          if (kdoc !== null) {
+            return map.command;
+          }
+          break;
+        case "xset":
+          const xset = execSyncCommand("xset", ["-q"]);
+          if (xset !== null) {
+            return map.command;
+          }
+          break;
+      }
     }
   }
   return null;
@@ -554,6 +674,14 @@ const getDisplayStatus = () => {
     return null;
   }
   switch (HARDWARE.display.status.command) {
+    case "ddcutil":
+      const ddcutil = execSyncCommand("sudo", ["ddcutil", "getvcp", "0xD6", "--brief"]);
+      const match = ddcutil !== null ? ddcutil.match(/VCP D6 \S+ x0?([1-5])/) : null;
+      if (match) {
+        const output = match[1] === "1";
+        return output ? "ON" : "OFF";
+      }
+      break;
     case "wlopm":
       const wlopm = execSyncCommand("wlopm", []);
       if (wlopm !== null) {
@@ -586,7 +714,8 @@ const getDisplayStatus = () => {
  * the appropriate command to set the display status.
  *
  * @param {string} status - The desired status ('ON' or 'OFF').
- * @param {Function} callback - A callback function that receives the output or error.
+ * @param {Function} [callback] - A callback function that receives the output or error.
+ * @returns {void}
  */
 const setDisplayStatus = (status, callback = null) => {
   if (!HARDWARE.support.displayStatus) {
@@ -599,6 +728,13 @@ const setDisplayStatus = (status, callback = null) => {
     return;
   }
   switch (HARDWARE.display.status.command) {
+    case "ddcutil":
+      execAsyncCommand("sudo", ["ddcutil", "setvcp", "0xD6", status === "ON" ? "1" : "4"], (reply, error) => {
+        fs.writeFileSync(path.join(HARDWARE.display.status.path, "dpms"), status.toLowerCase());
+        fs.writeFileSync(path.join(HARDWARE.display.status.path, "status"), status.toLowerCase());
+        if (typeof callback === "function") callback(reply, error);
+      });
+      break;
     case "wlopm":
       execAsyncCommand("wlopm", [`--${status.toLowerCase()}`, "*"], callback);
       break;
@@ -618,6 +754,9 @@ const setDisplayStatus = (status, callback = null) => {
  */
 const getDisplayBrightnessPath = () => {
   const backlight = "/sys/class/backlight";
+  if (!fs.existsSync(backlight)) {
+    return null;
+  }
   for (const address of fs.readdirSync(backlight)) {
     const brightnessFile = path.join(backlight, address, "brightness");
     if (!fs.existsSync(brightnessFile)) {
@@ -629,7 +768,7 @@ const getDisplayBrightnessPath = () => {
 };
 
 /**
- * Gets the available display brightness command checking for `ddcutil`.
+ * Gets the available display brightness command checking for `ddcutil` and `tee`.
  *
  * @returns {string|null} The display brightness command or null if nothing was found.
  */
@@ -637,22 +776,39 @@ const getDisplayBrightnessCommand = () => {
   const type = HARDWARE.session.type;
   const desktop = HARDWARE.session.desktop;
   const mapping = {
-    wayland: [{ command: "ddcutil", desktops: ["*"] }],
-    x11: [{ command: "ddcutil", desktops: ["*"] }],
+    wayland: [
+      { command: "ddcutil", desktops: ["*"] },
+      { command: "tee", desktops: ["*"] },
+    ],
+    x11: [
+      { command: "ddcutil", desktops: ["*"] },
+      { command: "tee", desktops: ["*"] },
+    ],
   }[type];
   for (const map of mapping || []) {
-    if (sudoRights() && commandExists(map.command) && map.desktops.some((d) => d === "*" || desktop.includes(d))) {
-      HARDWARE.display.brightness.path = null;
+    if (commandExists(map.command) && map.desktops.some((d) => d === "*" || desktop.includes(d))) {
       switch (map.command) {
         case "ddcutil":
-          const output = execSyncCommand("sudo", ["ddcutil", "capabilities"]);
-          if (output && output.includes("Feature: 10")) {
-            fs.writeFileSync(path.join(APP.cache, "Brightness.vcp"), "");
+          if (!sudoRights()) {
+            break;
+          }
+          const ddcutil = execSyncCommand("sudo", ["ddcutil", "capabilities"]);
+          if (ddcutil !== null && ddcutil.includes("Feature: 10")) {
+            HARDWARE.display.brightness.path = path.join(APP.cache, "Display");
+            fs.mkdirSync(HARDWARE.display.brightness.path, { recursive: true });
+            fs.writeFileSync(path.join(HARDWARE.display.brightness.path, "brightness"), "");
             return map.command;
           }
           break;
-        default:
-          return map.command;
+        case "tee":
+          if (!HARDWARE.display.brightness.path) {
+            break;
+          }
+          const file = path.join(HARDWARE.display.brightness.path, "brightness");
+          if (sudoRights() || writeRights(file)) {
+            return map.command;
+          }
+          break;
       }
     }
   }
@@ -660,65 +816,65 @@ const getDisplayBrightnessCommand = () => {
 };
 
 /**
- * Gets the maximum display brightness value using `/sys/class/backlight/.../max_brightness` or `ddcutil getvcp 10`.
+ * Gets the maximum display brightness value using the available command.
  *
  * @returns {number|null} The brightness maximum value or null if an error occurs.
  */
 const getDisplayBrightnessMax = () => {
   switch (HARDWARE.display.brightness.command) {
     case "ddcutil":
-      const output = execSyncCommand("sudo", ["ddcutil", "getvcp", "10", "--brief"]);
-      const match = output ? output.match(/VCP 10 C (\d+) (\d+)/) : null;
+      const ddcutil = execSyncCommand("sudo", ["ddcutil", "getvcp", "0x10", "--brief"]);
+      const match = ddcutil !== null ? ddcutil.match(/VCP 10 C (\d+) (\d+)/) : null;
       if (match) {
         return parseInt(match[2], 10);
       }
       return null;
-  }
-  if (HARDWARE.display.brightness.path) {
-    const max = readFile(path.join(HARDWARE.display.brightness.path, "max_brightness"));
-    if (max) {
-      return parseInt(max, 10);
-    }
+    case "tee":
+      const max = readFile(path.join(HARDWARE.display.brightness.path, "max_brightness"));
+      if (max) {
+        return parseInt(max, 10);
+      }
+      return null;
   }
   return null;
 };
 
 /**
- * Gets the current display brightness level using `/sys/class/backlight/.../brightness` or `ddcutil getvcp 10`.
+ * Gets the current display brightness level using the available command.
  *
- * @returns {number|null} The brightness level as a percentage or null if an error occurs.
+ * @returns {number|null} The brightness level (1-100) as a percentage or null if an error occurs.
  */
 const getDisplayBrightness = () => {
   if (!HARDWARE.support.displayBrightness) {
     return null;
   }
+  const max = HARDWARE.display.brightness.value.max || 1;
   switch (HARDWARE.display.brightness.command) {
     case "ddcutil":
-      const output = execSyncCommand("sudo", ["ddcutil", "getvcp", "10", "--brief"]);
-      const match = output ? output.match(/VCP 10 C (\d+) (\d+)/) : null;
+      const ddcutil = execSyncCommand("sudo", ["ddcutil", "getvcp", "0x10", "--brief"]);
+      const match = ddcutil !== null ? ddcutil.match(/VCP 10 C (\d+) (\d+)/) : null;
       if (match) {
-        return parseInt(match[1], 10);
+        return Math.max(1, Math.min(Math.round((parseInt(match[1], 10) / max) * 100), 100));
       }
       return null;
-  }
-  if (HARDWARE.display.brightness.path) {
-    const brightness = readFile(path.join(HARDWARE.display.brightness.path, "brightness"));
-    if (brightness) {
-      const max = HARDWARE.display.brightness.value.max || 1;
-      return Math.max(1, Math.min(Math.round((parseInt(brightness, 10) / max) * 100), 100));
-    }
+    case "tee":
+      const brightness = readFile(path.join(HARDWARE.display.brightness.path, "brightness"));
+      if (brightness) {
+        return Math.max(1, Math.min(Math.round((parseInt(brightness, 10) / max) * 100), 100));
+      }
   }
   return null;
 };
 
 /**
- * Sets the display brightness level using `/sys/class/backlight/.../brightness` or `ddcutil setvcp 10`.
+ * Sets the display brightness level using the available command.
  *
  * This function takes a brightness value between 1 to 100 percent,
  * maps it to the proper range and writes it to the system.
  *
  * @param {number} brightness - The desired brightness level (1-100).
- * @param {Function} callback - A callback function that receives the output or error.
+ * @param {Function} [callback] - A callback function that receives the output or error.
+ * @returns {void}
  */
 const setDisplayBrightness = (brightness, callback = null) => {
   if (!HARDWARE.support.displayBrightness) {
@@ -730,31 +886,32 @@ const setDisplayBrightness = (brightness, callback = null) => {
     if (typeof callback === "function") callback(null, "Invalid brightness");
     return;
   }
+  const max = HARDWARE.display.brightness.value.max || 1;
   switch (HARDWARE.display.brightness.command) {
     case "ddcutil":
-      execAsyncCommand("sudo", ["ddcutil", "setvcp", "10", `${brightness}`], (reply, error) => {
-        if (!error) {
-          fs.writeFileSync(path.join(APP.cache, "Brightness.vcp"), `${brightness}`);
-        }
+      const percentage = Math.max(1, Math.min(Math.round((brightness / 100) * max), max));
+      execAsyncCommand("sudo", ["ddcutil", "setvcp", "0x10", `${percentage}`], (reply, error) => {
+        fs.writeFileSync(path.join(HARDWARE.display.brightness.path, "brightness"), `${percentage}`);
         if (typeof callback === "function") callback(reply, error);
       });
       return;
-  }
-  if (HARDWARE.display.brightness.path) {
-    const max = HARDWARE.display.brightness.value.max || 1;
-    const value = Math.max(1, Math.min(Math.round((brightness / 100) * max), max));
-    const proc = execAsyncCommand("sudo", ["tee", path.join(HARDWARE.display.brightness.path, "brightness")], callback);
-    proc.stdin.write(value.toString());
-    proc.stdin.end();
+    case "tee":
+      const file = path.join(HARDWARE.display.brightness.path, "brightness");
+      const value = Math.max(1, Math.min(Math.round((brightness / 100) * max), max));
+      const [cmd, args] = HARDWARE.support.access.sudo ? ["sudo", ["tee", file]] : ["tee", [file]];
+      const proc = execAsyncCommand(cmd, args, callback);
+      proc.stdin.write(`${value}`);
+      proc.stdin.end();
+      return;
   }
 };
 
 /**
- * Gets the default audio device using `pactl`.
+ * Gets the default audio output using `pactl`.
  *
- * @returns {string|null} The default audio device or null if an error occurs.
+ * @returns {string|null} The default audio output or null if an error occurs.
  */
-const getAudioDevice = () => {
+const getAudioOutput = () => {
   if (!commandExists("pactl")) {
     return null;
   }
@@ -762,13 +919,17 @@ const getAudioDevice = () => {
   if (!output) {
     return null;
   }
-  return !output.includes("auto_null") ? output.trim() : null;
+  const sink = output.trim();
+  if (!sink.includes("auto_null") && !sink.endsWith(".monitor")) {
+    return sink;
+  }
+  return null;
 };
 
 /**
- * Gets the default audio device volume using `pactl`.
+ * Gets the default audio output volume using `pactl`.
  *
- * @returns {number|null} The default audio device volume as a percentage or null if an error occurs.
+ * @returns {number|null} The default audio output volume as a percentage or null if an error occurs.
  */
 const getAudioVolume = () => {
   if (!HARDWARE.support.audioVolume) {
@@ -787,12 +948,13 @@ const getAudioVolume = () => {
 };
 
 /**
- * Sets the default audio device volume using `pactl`.
+ * Sets the default audio output volume using `pactl`.
  *
- * This function takes a volume value between 0 to 100 percent and sends it to the device.
+ * This function takes a volume value between 0 to 100 percent and sends it to the output device.
  *
  * @param {number} volume - The desired volume level (0-100).
- * @param {Function} callback - A callback function that receives the output or error.
+ * @param {Function} [callback] - A callback function that receives the output or error.
+ * @returns {void}
  */
 const setAudioVolume = (volume, callback = null) => {
   if (!HARDWARE.support.audioVolume) {
@@ -806,6 +968,70 @@ const setAudioVolume = (volume, callback = null) => {
   }
   execAsyncCommand("pactl", ["set-sink-mute", "@DEFAULT_SINK@", volume === 0 ? "1" : "0"]);
   execAsyncCommand("pactl", ["set-sink-volume", "@DEFAULT_SINK@", `${volume}%`], callback);
+};
+
+/**
+ * Gets the default audio input using `pactl`.
+ *
+ * @returns {string|null} The default audio input or null if an error occurs.
+ */
+const getAudioInput = () => {
+  if (!commandExists("pactl")) {
+    return null;
+  }
+  const output = execSyncCommand("pactl", ["get-default-source"]);
+  if (!output) {
+    return null;
+  }
+  const source = output.trim();
+  if (!source.includes("auto_null") && !source.endsWith(".monitor")) {
+    return source;
+  }
+  return null;
+};
+
+/**
+ * Gets the default audio input volume using `pactl`.
+ *
+ * @returns {number|null} The default audio input volume as a percentage or null if an error occurs.
+ */
+const getMicrophoneVolume = () => {
+  if (!HARDWARE.support.microphoneVolume) {
+    return null;
+  }
+  const mute = execSyncCommand("pactl", ["get-source-mute", "@DEFAULT_SOURCE@"]);
+  const volume = execSyncCommand("pactl", ["get-source-volume", "@DEFAULT_SOURCE@"]);
+  if (!mute || !volume) {
+    return null;
+  }
+  const match = volume.match(/\/(\s*(\d+)%)/);
+  if (match) {
+    return Math.max(0, Math.min(100, mute.includes("yes") ? 0 : parseInt(match[2], 10)));
+  }
+  return null;
+};
+
+/**
+ * Sets the default audio input volume using `pactl`.
+ *
+ * This function takes a volume value between 0 to 100 percent and sends it to the input device.
+ *
+ * @param {number} volume - The desired volume level (0-100).
+ * @param {Function} [callback] - A callback function that receives the output or error.
+ * @returns {void}
+ */
+const setMicrophoneVolume = (volume, callback = null) => {
+  if (!HARDWARE.support.microphoneVolume) {
+    if (typeof callback === "function") callback(null, "Not supported");
+    return;
+  }
+  if (typeof volume !== "number" || volume < 0 || volume > 100) {
+    console.error("Volume must be a number between 0 and 100");
+    if (typeof callback === "function") callback(null, "Invalid volume");
+    return;
+  }
+  execAsyncCommand("pactl", ["set-source-mute", "@DEFAULT_SOURCE@", volume === 0 ? "1" : "0"]);
+  execAsyncCommand("pactl", ["set-source-volume", "@DEFAULT_SOURCE@", `${volume}%`], callback);
 };
 
 /**
@@ -826,8 +1052,9 @@ const getKeyboardVisibility = () => {
  * This function takes a desired visibility ('ON' or 'OFF') and executes
  * the appropriate command to show or hide the keyboard.
  *
- * @param {bool} visibility - The desired visibility ('ON' or 'OFF').
- * @param {Function} callback - A callback function that receives the output or error.
+ * @param {string} visibility - The desired visibility ('ON' or 'OFF').
+ * @param {Function} [callback] - A callback function that receives the output or error.
+ * @returns {void}
  */
 const setKeyboardVisibility = (visibility, callback = null) => {
   if (!HARDWARE.support.keyboardVisibility) {
@@ -865,10 +1092,11 @@ const checkPackageUpgrades = () => {
  * This function executes the command asynchronously.
  * The output of the command will be provided through the callback function.
  *
- * @param {Function} callback - A callback function that receives the output or error.
+ * @param {Function} [callback] - A callback function that receives the output or error.
+ * @returns {void}
  */
 const shutdownSystem = (callback = null) => {
-  if (!HARDWARE.support.sudoRights) {
+  if (!HARDWARE.support.access.shutdown) {
     if (typeof callback === "function") callback(null, "Not supported");
     return;
   }
@@ -881,10 +1109,11 @@ const shutdownSystem = (callback = null) => {
  * This function executes the command asynchronously.
  * The output of the command will be provided through the callback function.
  *
- * @param {Function} callback - A callback function that receives the output or error.
+ * @param {Function} [callback] - A callback function that receives the output or error.
+ * @returns {void}
  */
 const rebootSystem = (callback = null) => {
-  if (!HARDWARE.support.sudoRights) {
+  if (!HARDWARE.support.access.reboot) {
     if (typeof callback === "function") callback(null, "Not supported");
     return;
   }
@@ -892,9 +1121,9 @@ const rebootSystem = (callback = null) => {
 };
 
 /**
- * Checks if sudo commands can run without a password.
+ * Checks if `sudo` commands can run without a password.
  *
- * @returns {bool} Returns true if password-less sudo rights exists.
+ * @returns {boolean} True if password-less sudo rights exist.
  */
 const sudoRights = () => {
   try {
@@ -905,10 +1134,63 @@ const sudoRights = () => {
 };
 
 /**
+ * Checks if `apt install` can run via sudo without a password.
+ *
+ * @returns {boolean} True if password-less apt install rights exist.
+ */
+const installRights = () => {
+  try {
+    cpr.execSync(`sudo -n apt install --help`, { encoding: "utf8", stdio: "ignore" });
+    return true;
+  } catch {}
+  return false;
+};
+
+/**
+ * Checks if `reboot` can run via sudo without a password.
+ *
+ * @returns {boolean} True if password-less reboot rights exist.
+ */
+const rebootRights = () => {
+  try {
+    cpr.execSync(`sudo -n reboot --help`, { encoding: "utf8", stdio: "ignore" });
+    return true;
+  } catch {}
+  return false;
+};
+
+/**
+ * Checks if `shutdown` can run via sudo without a password.
+ *
+ * @returns {boolean} True if password-less shutdown rights exist.
+ */
+const shutdownRights = () => {
+  try {
+    cpr.execSync(`sudo -n shutdown --help`, { encoding: "utf8", stdio: "ignore" });
+    return true;
+  } catch {}
+  return false;
+};
+
+/**
+ * Checks if a file path has write access rights.
+ *
+ * @param {string} path - The file path to check.
+ * @returns {boolean} True if write access rights exist.
+ */
+const writeRights = (path) => {
+  try {
+    fs.accessSync(path, fs.constants.R_OK | fs.constants.W_OK);
+    return true;
+  } catch {}
+  return false;
+};
+
+/**
  * Checks if a service is running using `systemctl`.
  *
  * @param {string} name - The service name to check.
- * @returns {bool} Returns true if the service runs.
+ * @returns {boolean} True if the service runs.
  */
 const serviceRuns = (name) => {
   try {
@@ -922,7 +1204,7 @@ const serviceRuns = (name) => {
  * Checks if a process is running using `pidof`.
  *
  * @param {string} name - The process name to check.
- * @returns {bool} Returns true if the process runs.
+ * @returns {boolean} True if the process runs.
  */
 const processRuns = (name) => {
   try {
@@ -936,7 +1218,7 @@ const processRuns = (name) => {
  * Checks if a command is available using `which`.
  *
  * @param {string} name - The command name to check.
- * @returns {bool} Returns true if the command is available.
+ * @returns {boolean} True if the command is available.
  */
 const commandExists = (name) => {
   try {
@@ -969,7 +1251,7 @@ const execSyncCommand = (cmd, args) => {
  *
  * @param {string} cmd - The command to execute.
  * @param {Array<string>} args - The arguments for the command.
- * @param {Function} callback - A callback function that receives the output or error.
+ * @param {Function} [callback] - A callback function that receives the output or error.
  * @returns {Object} The spawned process object.
  */
 const execAsyncCommand = (cmd, args, callback = null) => {
@@ -1005,7 +1287,7 @@ const execAsyncCommand = (cmd, args, callback = null) => {
  *
  * @param {string} cmd - The script to execute.
  * @param {Array<string>} args - The arguments for the command.
- * @param {Function} callback - A callback function that receives the progress or error.
+ * @param {Function} [callback] - A callback function that receives the progress or error.
  * @returns {Object} The spawned process object.
  */
 const execScriptCommand = (cmd, args, callback = null) => {
@@ -1055,7 +1337,7 @@ const execScriptCommand = (cmd, args, callback = null) => {
  *
  * @param {string} cmd - The command to monitor.
  * @param {Array<string>} args - The arguments for the command.
- * @param {Function} callback - A callback function that receives the output or error.
+ * @param {Function} [callback] - A callback function that receives the output or error.
  * @returns {Object} The spawned process object.
  */
 const commandMonitor = (cmd, args, callback = null) => {
@@ -1080,7 +1362,7 @@ const commandMonitor = (cmd, args, callback = null) => {
  * Monitors D-Bus property changes asynchronously using `dbus-monitor`.
  *
  * @param {string} path - The D-Bus object path.
- * @param {Function} callback - A callback function that receives the changed property.
+ * @param {Function} [callback] - A callback function that receives the changed property.
  * @returns {Object} The spawned process object.
  */
 const dbusMonitor = (path, callback = null) => {
@@ -1127,7 +1409,8 @@ const dbusMonitor = (path, callback = null) => {
  * @param {string} path - The D-Bus object path.
  * @param {string} method - The D-Bus method name.
  * @param {Array<string>} values - The argument values for the D-Bus method.
- * @param {Function} callback - A callback function that receives the output or error.
+ * @param {Function} [callback] - A callback function that receives the output or error.
+ * @returns {void}
  */
 const dbusCall = (path, method, values, callback = null) => {
   const cmd = "dbus-send";
@@ -1148,7 +1431,7 @@ const dbusCall = (path, method, values, callback = null) => {
  * Reads file content synchronously or asynchronously from the filesystem.
  *
  * @param {string} path - Path of the file.
- * @param {boolean} sync - If true, reads the file synchronously, otherwise asynchronously.
+ * @param {boolean} [sync] - If true, reads the file synchronously, otherwise asynchronously.
  * @returns {string|null|Promise<string|null>} The file content or null if an error occurs.
  */
 const readFile = (path, sync = true) => {
@@ -1174,6 +1457,7 @@ const readFile = (path, sync = true) => {
  *
  * @param {Function} callback - An async callback function.
  * @param {number} ms - Sleep time in milliseconds.
+ * @returns {void}
  */
 const interval = (callback, ms) => {
   const run = () => {
@@ -1204,12 +1488,15 @@ module.exports = {
   getProcessorUsage,
   getProcessorTemperature,
   getBatteryLevel,
+  getIlluminanceLevel,
   getDisplayStatus,
   setDisplayStatus,
   getDisplayBrightness,
   setDisplayBrightness,
   getAudioVolume,
   setAudioVolume,
+  getMicrophoneVolume,
+  setMicrophoneVolume,
   getKeyboardVisibility,
   setKeyboardVisibility,
   checkPackageUpgrades,
