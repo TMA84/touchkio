@@ -721,6 +721,51 @@ const reloadView = () => {
 };
 
 /**
+ * Tracks which webview indexes currently have an active retry loop, so a
+ * repeated did-fail-load (e.g. several drops in a row) doesn't stack up
+ * multiple concurrent loops for the same webview.
+ */
+const viewRetrying = new Set();
+
+/**
+ * Watches for connectivity to return after a webview failed to load, then
+ * reloads its original target url. Without this, a webview that fails to
+ * load once (e.g. a transient Wi-Fi drop) is stuck showing the error page
+ * forever - nothing else re-checks connectivity or re-navigates it, even
+ * once the network recovers. Retries indefinitely, matching this app's
+ * "never give up" approach to reconnection on unattended kiosk displays.
+ *
+ * @param {number} i - The webview index that failed to load.
+ * @param {WebContentsView} view - The webview that failed to load.
+ */
+const retryViewLoad = (i, view) => {
+  if (viewRetrying.has(i)) {
+    return;
+  }
+  viewRetrying.add(i);
+
+  const url = WEBVIEW.viewUrls[i];
+  const attempt = () => {
+    onlineStatus(url, 1000, 60000).then((online) => {
+      // Stop watching if the view has since loaded something else (e.g. a
+      // manual reload/refresh already recovered it in the meantime).
+      if (!view.webContents.getURL().startsWith("data:")) {
+        viewRetrying.delete(i);
+        return;
+      }
+      if (online) {
+        console.info(`Reconnected, reloading webview ${i}: ${url}`);
+        viewRetrying.delete(i);
+        view.webContents.loadURL(url);
+      } else {
+        attempt();
+      }
+    });
+  };
+  attempt();
+};
+
+/**
  * Resizes and positions all webviews.
  */
 const resizeView = () => {
@@ -1196,6 +1241,7 @@ const viewEvents = async () => {
           default:
             console.error(`Load Error: ${url}, ${text} (${code})`);
             view.webContents.loadURL(errorHtml(code, text, url, WEBVIEW.theme.get()));
+            retryViewLoad(i, view);
         }
         loaded(i);
       }
